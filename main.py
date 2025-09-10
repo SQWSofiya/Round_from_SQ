@@ -4,7 +4,7 @@ import uuid
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-REQUIRED_CHANNEL = "@Round_from_SQ"
+REQUIRED_CHANNEL = "@S_Factory"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -64,3 +64,4 @@ if __name__ == "__main__":
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     main()
+
