@@ -15,6 +15,8 @@ if not BOT_TOKEN:
 ADMIN_ID = 230479313
 USERS_FILE = "users.json"
 
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+
 def load_users():
     if not os.path.exists(USERS_FILE):
         return set()
@@ -32,7 +34,7 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
     try:
         member = await context.bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         return member.status in ["member", "administrator", "creator"]
-    except:
+    except Exception:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,7 +44,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in users:
         users.add(user_id)
         save_users(users)
-
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=f"➕ Новый пользователь. Всего: {len(users)}"
@@ -50,19 +51,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "👋 Привет! Я превращаю твои видео в кружочки 🎥✨\n\n"
-        "🔹 Просто пришли видео (до 60 секунд).\n"
+        "🔹 Просто пришли видео (до 60 секунд и размером до ~40 МБ).\n"
         "🔹 Убедись, что подписан на канал @sqw_factory.\n"
-        "🔹 Получишь Telegram-кружок с сохранённым звуком!\n\n"
+        "🔹 Получишь Telegram‑кружок с сохранённым звуком!\n\n"
         "Если что-то не работает — попробуй другое видео или напиши @SQWSofiya 💬"
     )
 
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    video = update.message.video
 
-    if video.duration and video.duration > 60:
+    video = update.message.video
+    document = None
+    if update.message.document:
+        doc = update.message.document
+        if doc.mime_type and doc.mime_type.startswith("video"):
+            document = doc
+
+    media = video or document
+
+    if media is None:
+        return
+
+    if getattr(media, "duration", None) and media.duration > 60:
         await update.message.reply_text("⚠️ Пожалуйста, отправьте видео длиной не более 60 секунд.")
         return
+
+    if getattr(media, "file_size", None):
+        size = media.file_size
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"📋 Получено видео от {user.id} — размер: {size} байт. "
+                f"file_id: {media.file_id}"
+            )
+        )
+        if size > MAX_FILE_SIZE_BYTES:
+            await update.message.reply_text(
+                f"⚠️ Извините, видео слишком большое для обработки (более {MAX_FILE_SIZE_BYTES // (1024*1024)} МБ)."
+            )
+            return
 
     if not await is_user_subscribed(user.id, context):
         await update.message.reply_text(
@@ -76,7 +103,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     output_path = f"{uuid.uuid4()}.mp4"
 
     try:
-        file = await video.get_file()
+        file = await media.get_file()
         await file.download_to_drive(input_path)
 
         subprocess.run([
@@ -92,31 +119,42 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except subprocess.CalledProcessError as e:
         await update.message.reply_text(
-            "⚠️ Не удалось обработать видео. "
-            "Проверьте, что оно не повреждено и длится не более 60 секунд."
+            "⚠️ Не удалось обработать видео. Попробуйте другой файл или формат."
         )
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                "⚠️ Ошибка при обработке видео:\n"
-                f"ID: {user.id}\n"
-                f"Ошибка: {str(e)}"
+                f"❌ Ошибка обработки видео от {user.id}:\n"
+                f"{str(e)}\n"
+                f"file_id: {media.file_id}"
             )
         )
-
+    except Exception as e:
+        await update.message.reply_text("⚠️ Не удалось получить файл. Возможно, он слишком большой.")
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"❌ Общая ошибка при получении/скачивании файла от {user.id}:\n"
+                f"{str(e)}\n"
+                f"{repr(media)}"
+            )
+        )
     finally:
         with suppress(Exception):
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=processing_message.message_id)
         with suppress(Exception):
-            os.remove(input_path)
+            if os.path.exists(input_path):
+                os.remove(input_path)
         with suppress(Exception):
-            os.remove(output_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_or_document))
 
     app.run_polling()
 
