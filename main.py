@@ -2,9 +2,11 @@ import os
 import subprocess
 import uuid
 import json
+import asyncio
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
 from contextlib import suppress
+from urllib.parse import urljoin
 
 REQUIRED_CHANNEL = "@sqw_factory"
 
@@ -131,14 +133,13 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
                 os.remove(output_path)
 
 
-def main():
-    from urllib.parse import urljoin
-
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_or_document))
 
-    port = int(os.environ.get("PORT", "8443"))
+    port = int(os.environ.get("PORT", 8443))
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
 
     if not base_url:
@@ -149,13 +150,14 @@ def main():
 
     print(f"⚙️ Установка webhook на {webhook_url}")
 
-    app.run_webhook(
+    await app.bot.set_webhook(webhook_url)
+
+    await app.run_webhook(
         listen="0.0.0.0",
         port=port,
-        webhook_url=webhook_url,
-        webhook_path=webhook_path
+        url_path=webhook_path,
     )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
