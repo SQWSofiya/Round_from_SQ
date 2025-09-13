@@ -14,8 +14,8 @@ if not BOT_TOKEN:
 
 ADMIN_ID = 230479313
 USERS_FILE = "users.json"
-
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -26,9 +26,11 @@ def load_users():
     except Exception:
         return set()
 
+
 def save_users(user_ids):
     with open(USERS_FILE, "w") as f:
         json.dump(list(user_ids), f)
+
 
 async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     try:
@@ -36,6 +38,7 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
         return member.status in ["member", "administrator", "creator"]
     except Exception:
         return False
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -46,16 +49,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_users(users)
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"➕ Новый пользователь. Всего: {len(users)}"
+            text=f"🔔 Новый пользователь. Всего: {len(users)}"
         )
 
     await update.message.reply_text(
         "👋 Привет! Я превращаю твои видео в кружочки 🎥✨\n\n"
-        "🔹 Просто пришли видео (до 60 секунд и размером до ~40 МБ).\n"
-        "🔹 Убедись, что подписан на канал @sqw_factory.\n"
-        "🔹 Получишь Telegram‑кружок с сохранённым звуком!\n\n"
+        "🔸 Просто пришли видео (до 60 секунд).\n"
+        "🔸 Убедись, что подписан на канал @sqw_factory.\n"
+        "🔸 Получишь Telegram-кружок со звуком!\n\n"
         "Если что-то не работает — попробуй другое видео или напиши @SQWSofiya 💬"
     )
+
 
 async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -78,13 +82,6 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
 
     if getattr(media, "file_size", None):
         size = media.file_size
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"📋 Получено видео от {user.id} — размер: {size} байт. "
-                f"file_id: {media.file_id}"
-            )
-        )
         if size > MAX_FILE_SIZE_BYTES:
             await update.message.reply_text(
                 f"⚠️ Извините, видео слишком большое для обработки (более {MAX_FILE_SIZE_BYTES // (1024*1024)} МБ)."
@@ -93,11 +90,11 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
 
     if not await is_user_subscribed(user.id, context):
         await update.message.reply_text(
-            f"Пожалуйста, подпишитесь на канал {REQUIRED_CHANNEL}, чтобы пользоваться ботом 😊"
+            f"Пожалуйста, подпишитесь на канал {REQUIRED_CHANNEL}, чтобы пользоваться ботом 🙂"
         )
         return
 
-    processing_message = await update.message.reply_text("⏳ Подождите, ваше видео обрабатывается...")
+    processing_message = await update.message.reply_text("⏳ Пожалуйста, подождите, ваше видео обрабатывается...")
 
     input_path = f"{uuid.uuid4()}.mp4"
     output_path = f"{uuid.uuid4()}.mp4"
@@ -121,24 +118,8 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(
             "⚠️ Не удалось обработать видео. Попробуйте другой файл или формат."
         )
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"❌ Ошибка обработки видео от {user.id}:\n"
-                f"{str(e)}\n"
-                f"file_id: {media.file_id}"
-            )
-        )
     except Exception as e:
         await update.message.reply_text("⚠️ Не удалось получить файл. Возможно, он слишком большой.")
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"❌ Общая ошибка при получении/скачивании файла от {user.id}:\n"
-                f"{str(e)}\n"
-                f"{repr(media)}"
-            )
-        )
     finally:
         with suppress(Exception):
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=processing_message.message_id)
@@ -151,24 +132,30 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
 
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    from urllib.parse import urljoin
 
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_or_document))
 
-    app.run_polling()
+    port = int(os.environ.get("PORT", "8443"))
+    base_url = os.environ.get("RENDER_EXTERNAL_URL")
+
+    if not base_url:
+        raise RuntimeError("Переменная окружения RENDER_EXTERNAL_URL не задана!")
+
+    webhook_path = "/webhook"
+    webhook_url = urljoin(base_url, webhook_path)
+
+    print(f"⚙️ Установка webhook на {webhook_url}")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        webhook_url=webhook_url,
+        webhook_path=webhook_path
+    )
+
 
 if __name__ == "__main__":
-    import threading
-    import http.server
-    import socketserver
-
-    def run_dummy_server():
-        port = int(os.environ.get("PORT", 10000))
-        handler = http.server.SimpleHTTPRequestHandler
-        with socketserver.TCPServer(("", port), handler) as httpd:
-            httpd.serve_forever()
-
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-
     main()
