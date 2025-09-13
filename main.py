@@ -2,21 +2,24 @@ import os
 import subprocess
 import uuid
 import json
-import asyncio
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    CommandHandler,
+)
 from contextlib import suppress
-from urllib.parse import urljoin
 
 REQUIRED_CHANNEL = "@sqw_factory"
+ADMIN_ID = 230479313
+USERS_FILE = "users.json"
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("❌ Переменная окружения BOT_TOKEN не задана.")
-
-ADMIN_ID = 230479313
-USERS_FILE = "users.json"
-MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 
 def load_users():
@@ -74,7 +77,6 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
             document = doc
 
     media = video or document
-
     if media is None:
         return
 
@@ -86,7 +88,7 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
         size = media.file_size
         if size > MAX_FILE_SIZE_BYTES:
             await update.message.reply_text(
-                f"⚠️ Извините, видео слишком большое для обработки (более {MAX_FILE_SIZE_BYTES // (1024*1024)} МБ)."
+                f"⚠️ Извините, видео слишком большое для обработки (более {MAX_FILE_SIZE_BYTES // (1024 * 1024)} МБ)."
             )
             return
 
@@ -120,8 +122,23 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(
             "⚠️ Не удалось обработать видео. Попробуйте другой файл или формат."
         )
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"⚠ Ошибка обработки видео от {user.id}:\n"
+                f"{str(e)}\n"
+                f"file_id: {media.file_id}"
+            )
+        )
     except Exception as e:
         await update.message.reply_text("⚠️ Не удалось получить файл. Возможно, он слишком большой.")
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"⚠ Общая ошибка при получении/скачивании файла от {user.id}:\n"
+                f"{str(e)}"
+            )
+        )
     finally:
         with suppress(Exception):
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=processing_message.message_id)
@@ -133,9 +150,10 @@ async def handle_video_or_document(update: Update, context: ContextTypes.DEFAULT
                 os.remove(output_path)
 
 
-async def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+def main():
+    from urllib.parse import urljoin
 
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_or_document))
 
@@ -150,14 +168,13 @@ async def main():
 
     print(f"⚙️ Установка webhook на {webhook_url}")
 
-    await app.bot.set_webhook(webhook_url)
-
-    await app.run_webhook(
+    app.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=webhook_path,
+        webhook_url=webhook_url
     )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
