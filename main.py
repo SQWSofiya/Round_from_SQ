@@ -15,7 +15,7 @@ from contextlib import suppress
 REQUIRED_CHANNEL = "@sqw_factory"
 ADMIN_ID = 230479313
 USERS_FILE = "users.json"
-MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -178,3 +178,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
